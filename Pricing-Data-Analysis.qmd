@@ -1,0 +1,679 @@
+---
+title: "Pricing Data Analysis"
+author: "Iman Mousavi"
+format: html
+jupyter: python3
+date: "2023-08-17"
+execute: 
+  echo: false
+  cache: true
+  warning: false
+toc: true
+toc-title: Sections
+theme: theme.scss
+code-link: true
+code-fold: show
+code-tools: true
+highlight-style: github
+---
+::: {.column-margin}
+![](Pricing-Data-Analysis_files/snapp-logo.png)
+:::
+
+# 1. Distance Bucket
+
+When a customer submits an order, its data is logged in the “Order Table“. Then this order is offered to bikers. This data is stored in the “Offer Table,” and it means that an order is offered to “Biker ID” at the “created_at” moment, and when a “Biker ID” accepts to deliver that order, its data is stored in the “Allotment Table.”
+
+The amount a customer pays is called “Fare,” The distance between the source and destination is called “Distance” in “The invoice Table“.
+
+When an order is successfully finished, the “Status” field in the “Order Table” is “Delivered,” and when it fails to be completed, the “Status” field is “Canceled.”
+
+“Ride” means a successfully finished ride, and “Request” means orders that customers create.
+
+What's your analysis of the pricing in this city? What are your suggestions to maximize the ride numbers? 
+
+
+```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+import seaborn as sns
+import numpy as np
+```
+
+```{python}
+distance_buckets = pd.read_csv('Snapp Distance Bucket.csv', parse_dates=['Created Date'])
+```
+
+## Data Cleaning
+First few rows of the data set are as follows:
+```{python}
+distance_buckets.head()
+```
+
+`City`, `Service Type`, and `Created Date` contain no useful information due to the prefiltering process. These columns maintain a constant presence throughout the dataset. Additionally, the final row in the Excel sheet should be removed here.
+
+
+```{python}
+distance_buckets.drop(columns=['City', 'Service Type', 'Created Date'], inplace=True)
+
+distance_buckets.drop(distance_buckets.index[-1], inplace=True)
+```
+
+Given the non-standard format of the column names, I have standardized them for better readability and compatibility with Python conventions.
+
+
+```{python}
+distance_buckets.columns = distance_buckets.columns.str.lower().str.replace(' ', '_')
+
+distance_buckets.rename(columns={'distance_buckets(km)':'dist_buck', 'total_ride_fare(gmv)(irr)':'tot_ride_fare', '_offered-order_/_created-order_%':'offered_created%', 'accepted-order_/_offered-order%':'accepted_offered%', 'fullfillment_rate%':'fulfillment_rate%'}, inplace=True)
+
+print(distance_buckets.columns)
+```
+
+The presence of the '%' sign has led to three ratio columns having an 'object' data type, which is inaccurate and complicates their analysis.
+
+
+```{python}
+prct_cols = ['offered_created%', 'accepted_offered%','fulfillment_rate%']
+
+distance_buckets[prct_cols] = distance_buckets[prct_cols].applymap(lambda x: int(x.strip('%')))
+```
+
+Checking data types:
+
+```{python}
+distance_buckets.info()
+```
+
+The column `Average Ride Fare` is currently of the 'object' data type, indicating that it hasn't been stored as a numeric column. This is likely due to the inclusion of commas to enhance digit readability. However, to transform the column into a numeric format, I will remove the commas.
+
+```{python}
+distance_buckets['average_ride_fare'] = distance_buckets['average_ride_fare'].str.replace(',', '').astype('int')
+```
+
+## EDA
+Exploratory Data Analysis helps us to obtain a general understanding of data and answer to valuable questions along the way.
+
+### Request
+As the initial step, let's examine the `request` column to identify the distance buckets that are more commonly favored.
+
+```{python}
+distance_buckets.sort_values('request', ascending=False)[['dist_buck', 'request']].head(10)
+```
+
+A significant portion of the requests are associated with shorter distances, specifically those less than 10 kilometers.
+
+A histogram can provide a more insightful perspective into the distribution of these bins.
+
+```{python}
+# Set the font family and size
+plt.rcParams['font.family'] = 'Roboto'  
+plt.rcParams['font.size'] = 12
+
+col_green_plt = '#028239'
+```
+
+```{python}
+bins = np.arange(0, 1500, 200)
+sns.histplot(x = 'request', data = distance_buckets, bins=bins, color = col_green_plt)
+plt.xlabel('Request')
+plt.title('Request Histogram')
+plt.xticks(bins)
+plt.yticks(np.arange(0, 20, 2))
+plt.grid(axis='y', linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+The majority of distance buckets contain fewer than 200 requests. However, as observed earlier, certain bins exhibit a considerably higher volume of requests.
+
+To gain a better understanding of distance buckets with fewer than 200 requests, I've generated the following pandas dataframe:
+
+```{python}
+distance_buckets[distance_buckets['request'] < 200].sort_values('request')[['dist_buck', 'request']].head(10)
+```
+
+Evidently, there is a significant decline in the number of customer orders for longer distances.  
+
+### Offered to Created Percentage
+The subsequent table is arranged in descending order based on the percentage of Offered Orders to Created Orders:
+```{python}
+distance_buckets.sort_values('offered_created%', ascending=False)[['dist_buck', 'request', 'offered_created%']].head(10)
+```
+
+Greater distances are more likely to be offered completely. The histogram is plotted next:
+
+```{python}
+bins = np.arange(70, 105, 5)
+sns.histplot(x = 'offered_created%', data = distance_buckets, bins = bins, color = col_green_plt)
+plt.xlabel('Offered Orders to Created Orders %')
+plt.title('Offered to Created Orders Percentage Histogram')
+plt.grid(axis='y', linestyle='--', linewidth=0.3, color='gray')
+plt.yticks(np.arange(0, 24, 2))
+plt.show()
+```
+
+A total of 22 distance buckets have exhibited an `Offered to Created Orders` ratio surpassing 95%.
+
+There are a few buckets with notably low values of this ratio, falling below 80%. The subsequent dataframe identifies these specific buckets.
+
+```{python}
+distance_buckets[distance_buckets['offered_created%'] < 80][['dist_buck', 'request', 'offered_created%', 'average_ride_fare']]
+```
+
+While the requests within these buckets might not immediately stand out, their `average ride fare` implies a significant value associated with these requests.
+
+### Accepted to Offered Percentage
+To determine the proportion of accepted offers for bikers across different distance buckets, we can once more utilize a histogram to visualize the distribution of the `accepted_offered%` values. This will provide us with a comprehensive view of the data.
+
+```{python}
+bins = np.arange(30, 105, 10)
+sns.histplot(x = 'accepted_offered%', data = distance_buckets, bins = bins, color = col_green_plt)
+plt.xlabel('Accepted Orders to Offered Orders %')
+plt.yticks(np.arange(0, 14, 2))
+plt.title('Accepted to Offered Orders Percentage Histogram')
+plt.grid(axis='y', linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+The majority of distance buckets exhibit an `accepted-to-offered` percentage ranging between 50 and 60. Nonetheless, there exist certain buckets with ratios lower than 50%. To gain a deeper understanding, let's investigate and identify the distance buckets with percentages less than 60, arranging them in ascending order.
+
+```{python}
+distance_buckets[distance_buckets['accepted_offered%'] < 60].sort_values('accepted_offered%')[['dist_buck', 'accepted_offered%', 'average_ride_fare']]
+```
+
+Moderate distance buckets are more prone to get accepted with lower probability. **We need to concentrate on these distance buckets if our intention is to raise ride numbers.**
+
+### Fulfillment Percentage
+This ratio holds valuable information as well, indicating the percentage of requests that have been fulfilled entirely. As a first step, let's examine its histogram to gain insights into its distribution.
+
+```{python}
+bins = np.arange(20, 105, 10)
+sns.histplot(x = 'fulfillment_rate%', data = distance_buckets, bins = bins, color = col_green_plt)
+plt.xlabel('Fulfillment Rate %')
+plt.title('Fulfillment Rate Histogram')
+plt.grid(axis='y', linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+21 distance buckets have fullfillment rate lower than 50. Here are those buckets sorted by the ratio in ascending order:
+
+```{python}
+dist_lfr = distance_buckets[distance_buckets['fulfillment_rate%'] < 50].sort_values('fulfillment_rate%')[['dist_buck', 'request', 'offered_created%', 'accepted_offered%','fulfillment_rate%', 'average_ride_fare']]
+
+dist_lfr
+```
+
+Moderate to long distances have exhibited lower rates of fulfillment, and the reasons underlying this phenomenon should be investigated. It's imperative to distinguish between buckets with only a few requests and those with a more considerable number. I need criteria to judge whether a distance bucket has a low number of requests or not, and to achieve this, I will use the first quarter of requests across the buckets.
+
+```{python}
+dist_lr_lfr = dist_lfr[dist_lfr['request'] <= distance_buckets['request'].quantile(0.25)]
+
+dist_md_lfr = dist_lfr[dist_lfr['request'] > distance_buckets['request'].quantile(0.25)]
+```
+
+
+Distance bukcets with low number of requests are:
+
+```{python}
+dist_lr_lfr[['dist_buck', 'request', 'offered_created%', 'accepted_offered%','fulfillment_rate%', 'average_ride_fare']]
+```
+
+The above table consists of distance buckets with almost the longest paths implying that only a few requests want to send their packages in this range of KMs. 
+It's recommended to have an estimate of potential orders in each distance buckets via marketing research methods. It would clarify high prices cause the low number of requests or it's just normal for long paths.
+
+And those with more normal number of requests are:
+
+```{python}
+dist_md_lfr[['dist_buck', 'request', 'offered_created%', 'accepted_offered%','fulfillment_rate%', 'average_ride_fare']]
+```
+
+On the other hand, let's take a look at the buckets with the most fulfillment percentages:
+
+```{python}
+distance_buckets.sort_values('fulfillment_rate%', ascending=False)[['dist_buck', 'request', 'offered_created%', 'accepted_offered%','fulfillment_rate%', 'average_ride_fare']].head(10)
+```
+
+**Probability of delivering for shorter distances is higher than moderate and longer ones.**
+
+### Total and Average Ride Fare
+Finally, let's delve into the distribution of these crucial numeric columns and explore the potential questions they might raise.
+
+**NOTE: the values turned to MillionIRR for conveniece.**
+
+```{python}
+distance_buckets['tot_ride_fare_mirr'] = distance_buckets['tot_ride_fare'] / 1000000
+
+y_ticks = np.arange(0, 19, 2)
+
+bins = np.arange(0, 130, 20)
+sns.histplot(x = 'tot_ride_fare_mirr', data = distance_buckets, bins=bins, color = col_green_plt)
+plt.xlabel('GMV in Million')
+plt.title('Gross Merchandise Value Histogram')
+plt.yticks(y_ticks)
+plt.grid(axis='y', linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+A total of 18 distance buckets yielded less than 20 MIRR (Metric for Income from Rides) on that specific day for service type 1. In contrast, 5 distance buckets generated substantial revenues. Let's identify both groups starting with those with low revenue:
+
+```{python}
+distance_buckets[distance_buckets['tot_ride_fare_mirr'] < 20].sort_values('tot_ride_fare_mirr')[['dist_buck', 'request', 'offered_created%', 'accepted_offered%','fulfillment_rate%', 'tot_ride_fare_mirr']]
+```
+
+It's expected to have an acceptable amount of revenue in longer distances despite its lower requests. Lower rates of fulfillment, though, has prohibited that goal.  
+
+Next, those with higher revenue:
+```{python}
+distance_buckets[distance_buckets['tot_ride_fare_mirr'] >= 100].sort_values('tot_ride_fare_mirr', ascending=False)[['dist_buck', 'request', 'offered_created%', 'accepted_offered%','fulfillment_rate%', 'tot_ride_fare_mirr']]
+```
+
+To gain a deeper understanding of the fare amount, considering the average figures can also be insightful:
+
+```{python}
+distance_buckets['average_ride_fare_thsnds'] = distance_buckets['average_ride_fare'] / 1000
+
+bins = np.arange(100, 700 , 50)
+sns.histplot(x = 'average_ride_fare_thsnds', data = distance_buckets, bins = bins, color = col_green_plt)
+plt.xlabel('Avg. Ride Fare')
+plt.title('Average Ride Fare Histogram')
+plt.grid(axis='y', linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+3 distance buckets appear to be more profitable having averages higher than 400000. In the following table, you can see which buckets have such averages:
+
+```{python}
+distance_buckets[distance_buckets['average_ride_fare_thsnds'] >= 400].sort_values('average_ride_fare_thsnds')[['dist_buck', 'request', 'ride', 'accepted_offered%','fulfillment_rate%', 'tot_ride_fare_mirr','average_ride_fare']]
+```
+
+Indeed, it's evident that longer distances with fewer requests tend to yield higher average ride fares, but even so low rates of fulfillment might imply bad practices of pricing.
+
+### Relationship between Variables
+In the upcoming three scatterplots, I intend to examine whether any relationships exist between the variables.
+```{python}
+sns.scatterplot(x = 'average_ride_fare', y = 'offered_created%', data = distance_buckets, color = col_green_plt)
+plt.xlabel('Avg. Ride Fare')
+plt.ylabel('Offered Orders to Created Orders %')
+plt.title('Offered-to-created vs. Avg. Ride Fare Scatterplot')
+plt.grid(linestyle='--', linewidth=0.1, color='gray')
+plt.show()
+```
+
+```{python}
+sns.scatterplot(x = 'average_ride_fare', y = 'accepted_offered%', data = distance_buckets, color = col_green_plt)
+plt.xlabel('Avg. Ride Fare')
+plt.ylabel('Accepted Orders to Offered Orders %')
+plt.title('Accepted-to-offered vs. Avg. Ride Fare Scatterplot')
+plt.grid(linestyle='--', linewidth=0.1, color='gray')
+plt.show()
+```
+
+```{python}
+sns.scatterplot(x = 'average_ride_fare', y = 'fulfillment_rate%', data = distance_buckets, color = col_green_plt)
+plt.xlabel('Avg. Ride Fare')
+plt.ylabel('Fulfillment Rate %')
+plt.title('Fulfillment Rate vs. Avg. Ride Fare Scatterplot')
+plt.grid(linestyle='--', linewidth=0.1, color='gray')
+plt.show()
+```
+
+A negative virtually linear relationship can be seen in the first part of `accepted_offered%` and `fulfillment_rate%` vs. `average_ride_fare` plots. In the second part, however, such a characteristic is gone.
+
+One speculation is that pricing in those distance buckets with fares in the middle range have not been adjusted correctly. In other words, snapp have not incentivized bikers appropriately. 
+
+## Suggestions
+**NOTE: The suggestions below are made under the assumption that changes in order prices do not affect the cost structure. Additionally, external factors are disregarded, which is far from realistic business environment and price theory.**
+
+**Also, the analysis so far is based on the data generated in one day for the service type in a particular city. In general, we can't conclude with a one-day data set.**
+
+- The `fulfillment rate` in long distance buckets, especially with fewer requests, such as distances longer than 33 kilometers, is not very good. Despite of their higher average fares, we can increase the price as an incentive for riders to complete their orders. For example, in buckets 30-31 and 32-33 the average fare is higher than bucket with above-35 Kms (all three groups have similar number of rides). Prices should be increased with respect to distances, but not to the extent that makes us lose our orders.
+
+- Moderate distance buckets also suffer from low `accepted-to-offered` and `fulfillment rate` percentages. In these bins, number of requests surges comparing with the longer distances. Generally, the range of the average ride fare in these groups are in the middle. It could be helpful to increase price here too, but we should bear in mind that with the higher price, the number of requests are likely to drop and we need an optimized price here. Willingness-to-pay calculation, for instance, is able to give us a hint regarding the extent of price increases. 
+
+- Finally, distance buckets with shorter paths are the most lucrative ones. Number of `requests` for these types of rides is much greater than others and if we assume 70% as an acceptable `fulfillment rate`, current price level seems right and no specific price action is needed. `Total Ride Fare` or `GMV` is its peak at these distance buckets because of high requests. This number is in direct relationship with requests (and rides) and price, so decreasing prices can lead to more requests and may cover more than the loss due to lower price. Such policy, though, must be conducted after more analysis of potential exploitation of the market.
+
+# 2. Ride Loss Calculation
+Sometimes a technical problem arises and affects the creation or finishing of the orders. In these situations, business performance would drop, and some orders would be lost.
+One of the business team's tasks is investigating how these issues affect the business.
+On June 8th, there was a technical issue, and bikers couldn't accept the orders after 10 p.m., and the ride number dropped.
+In this question, you should calculate the number of rides we lost because of this issue.
+The table contains the performance of 2 regular days.
+
+```{python}
+ride_loss = pd.read_csv('Snapp Ride Loss Calculation.csv', parse_dates=['Date'])
+```
+
+```{python}
+ride_loss.columns = ride_loss.columns.str.replace(' ','_').str.lower()
+
+ride_loss.rename(columns={'_offered-order_/_created-order_%':'offered_created%', 'accepted-order_/_offered-order%':'accepted_offered%', 'fullfillment_rate%':'fulfillment_rate%', 'requester_':'requester'}, inplace=True)
+```
+
+
+```{python}
+prct_cols = ['offered_created%', 'accepted_offered%','fulfillment_rate%']
+
+ride_loss[prct_cols] = ride_loss[prct_cols].applymap(lambda x: int(x.strip('%')))
+
+ride_loss['average_ride_fare'] = ride_loss['average_ride_fare'].str.replace(',', '').astype('int')
+
+ride_loss['date'] = ride_loss['date'].fillna(method='ffill')
+```
+
+```{python}
+ride_loss
+```
+
+### Comparing the Days
+
+```{python}
+sns.lineplot(x = 'hour', y = 'request', hue = 'date', data = ride_loss)
+plt.xlabel('Hour')
+plt.ylabel('Request')
+plt.title('Requests across 3 days and 5 hours')
+plt.xticks(np.arange(19, 24, 1))
+plt.grid(linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+```{python}
+sns.lineplot(x = 'hour', y = 'ride', hue = 'date', data = ride_loss)
+plt.xlabel('Hour')
+plt.ylabel('Ride')
+plt.title('Rides across 3 days and 5 hours')
+plt.xticks(np.arange(19, 24, 1))
+plt.grid(linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+```{python}
+sns.lineplot(x = 'hour', y = 'offered_created%', hue = 'date', data = ride_loss)
+plt.xlabel('Hour')
+plt.ylabel('Offered Orders to Created Orders %')
+plt.title('Offered-to-created % across 3 days and 5 hours')
+plt.xticks(np.arange(19, 24, 1))
+plt.grid(linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+```{python}
+sns.lineplot(x = 'hour', y = 'accepted_offered%', hue = 'date', data = ride_loss)
+plt.xlabel('Hour')
+plt.ylabel('Accepted Orders to Offered Orders %')
+plt.title('Accepted-to-created % across 3 days and 5 hours')
+plt.xticks(np.arange(19, 24, 1))
+plt.grid(linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+
+```{python}
+sns.lineplot(x = 'hour', y = 'average_ride_fare', hue = 'date', data = ride_loss)
+plt.xlabel('Hour')
+plt.ylabel('Average Ride Fare')
+plt.title('Avg. Ride Fare across 3 days and 5 hours')
+plt.xticks(np.arange(19, 24, 1))
+plt.grid(linestyle='--', linewidth=0.3, color='gray')
+plt.show()
+```
+
+Before 10 p.m., the average fare on June 8th was consistently higher than the previous days, suggesting that each request's contribution was above the requests on June 6th and 7th. This difference is intesified after 10 p.m. A deeper investigation is warranted to determine whether the higher average fares were as a result of technical issues and rides decrease or influenced by specific factors on that day. 
+
+It's clear that, on average, on 6th and 7th of June, the ratio of accepted-to-offered before 10 p.m. are similar with its value on the 8th. However, after that hour, this ratio dropped significantly on June 8th. The average was 75.5% for the first two nights, but it dropped to 41% on the last night. Also, at 11 p.m, the average ratio was 69.6% and it dropped to 15% on the 8th!
+
+### Losses Calculations
+
+The table below presents the average values for the relevant variables for the 6th and 7th days.
+```{python}
+ride_loss_67_mean = ride_loss[(ride_loss['date'] == '2022-06-06') | (ride_loss['date'] == '2022-06-07')].groupby('hour')[['request', 'ride', 'offered_created%', 'accepted_offered%', 'fulfillment_rate%', 'average_ride_fare']].mean().round(3).reset_index()
+
+ride_loss_67_mean
+```
+
+And for a better understanding, here is the data for the last day, June 8th:
+```{python}
+ride_loss_8 = ride_loss[ride_loss['date'] == '2022-06-08'][['hour','request', 'ride', 'offered_created%', 'accepted_offered%', 'fulfillment_rate%', 'average_ride_fare']]
+
+ride_loss_8
+```
+
+Next, the two tables are merged together to enable further calculations (67J is derived from the table including the 6th and 7th of June, while 8J corresponds to the table of the 8th):
+
+```{python}
+joined_ride_loss = ride_loss_67_mean.drop(columns=['offered_created%']).merge(ride_loss_8.drop(columns=['offered_created%']), how='inner', on='hour', suffixes=('67J','8J'))
+
+joined_ride_loss
+```
+
+Next, we subtract the actual number of rides from the expected value, which is derived from the average of previous days:
+
+```{python}
+joined_ride_loss = joined_ride_loss[(joined_ride_loss['hour'] == 22) | (joined_ride_loss['hour'] == 23)]
+
+joined_ride_loss['expected_accepted'] = joined_ride_loss['request8J'] * joined_ride_loss['accepted_offered%67J'] / 100
+
+joined_ride_loss['expected_ride'] = round(joined_ride_loss['request8J'] * joined_ride_loss['fulfillment_rate%67J'] / 100)
+
+joined_ride_loss['loss_rides'] = joined_ride_loss['expected_ride'] - joined_ride_loss['ride8J']
+
+ride_loss_cal = joined_ride_loss[['hour','expected_accepted', 'expected_ride', 'loss_rides', 'average_ride_fare8J']]
+
+ride_loss_cal
+```
+
+The question asked about the number of rides lost because of the technical issue. Nevertheless, an estimation of revenue loss could also offer valuable insights. Ultimately, the calculation for revenue loss is as follows:
+
+```{python}
+ride_loss_cal['revenue_loss_million'] = ride_loss_cal['expected_ride'] * ride_loss_cal['average_ride_fare8J'] / 1000000
+
+ride_loss_cal[['hour', 'loss_rides','revenue_loss_million']]
+```
+
+**NOTE: In calculating revenue loss, I've assumed that the average ride fare would not have changed significantly if the technical issue hadn't occurred.**
+
+# 3. Price Monitoring
+The whole logic of box pricing is to match the demand and supply. The business performs well, and supply and demand are balanced when the price has been set correctly. We do real-time monitoring to ensure sound business performance and change prices whenever needed.
+The business would be at its best when the Accepted-Order to Offered-Order ratio is between 75% and 80%.
+These tables represent a snapshot of city A's real-time data at 17:30. We defined 19 areas in this city, which are coded.
+In this question, tell us what price action is needed to improve the business performance at 17:30.
+
+```{python}
+price_mont_request = pd.read_csv('Snapp Price Monitoring - Request.csv')
+
+price_mont_accoff = pd.read_csv('Snapp Price Monitoring - Accepted to Offered.csv')
+
+price_mont_fulfill = pd.read_csv('Snapp Price Monitoring - Fulfillment.csv')
+```
+
+**NOTE: Considering that Area Code 127 and 128 have notably high numbers of requests, it makes sense to consider them as outliers. Therefore, changing the center in the first heatmap to the median number of requests is a more robust approach.**
+
+```{python}
+price_mont_request.drop(price_mont_request.index[-1], inplace=True)
+
+colors = sns.diverging_palette(10, 100, s=70, l = 50, n=1000, as_cmap=False)
+
+req_array = price_mont_request.drop(columns=['Area Code']).to_numpy().flatten()
+
+req_med = np.median(req_array[~np.isnan(req_array)])
+
+price_mont_request.set_index('Area Code', inplace=True)
+
+sns.heatmap(price_mont_request, annot=True, fmt='.0f', linewidths=3, cmap=colors, center=req_med)
+plt.title('Number of Requests across Areas and Hours')
+plt.xlabel('Hour')
+plt.ylabel('Area Code')
+plt.yticks(rotation = 0)
+plt.show()
+```
+
+```{python}
+price_mont_accoff.drop(price_mont_accoff.index[-1], inplace=True)
+
+price_mont_accoff = price_mont_accoff.applymap(lambda x: int(x.strip('%')) if isinstance(x, str) else x)
+
+price_mont_accoff.set_index('Area Code', inplace=True)
+
+sns.heatmap(price_mont_accoff, annot=True, fmt='.0f', linewidths=3, vmin=0, vmax=100, cmap=colors)
+plt.title('Accepted-to-Offered Perc across Areas and Hours')
+plt.xlabel('Hour')
+plt.ylabel('Area Code')
+plt.yticks(rotation = 0)
+plt.show()
+```
+
+An more compeling heatmap shows the magnitude of deviation from our preferable range. In the next figure, direction and magnitude of deviation from the desired range is demonstrated. Those cells containing value of 0 represent acceptable percentage.
+
+```{python}
+def deviation_func(x):
+    if x > 80:
+      res = x - 80
+    elif x < 75:
+      res = x - 75
+    elif np.isnan(x):
+      res = x
+    else:
+      res = 0
+    return res
+
+price_mont_accoff_dev = price_mont_accoff.applymap(deviation_func)
+
+sns.heatmap(price_mont_accoff_dev, annot=True, fmt='.0f', linewidths=3, cmap=colors, center=0)
+plt.title('Deviation of Accepted-to-Offered Perc across Areas and Hours')
+plt.xlabel('Hour')
+plt.ylabel('Area Code')
+plt.yticks(rotation = 0)
+plt.show()
+```
+
+Areas 111, 114, 115, 116, 118, 121, 123, 124, and 126 have deviated more frequently and with higher percentage points than other areas. Pricing policies must be modified to achieve a more stable and favorable percentage.
+
+```{python}
+price_mont_fulfill.drop(price_mont_fulfill.index[-1], inplace=True)
+
+price_mont_fulfill.replace('-', np.nan, inplace=True)
+
+price_mont_fulfill = price_mont_fulfill.applymap(lambda x: int(x.strip('%')) if isinstance(x, str) else x)
+
+price_mont_fulfill.set_index('Area Code', inplace=True)
+
+sns.heatmap(price_mont_fulfill, annot=True, fmt='.0f', linewidths=3, vmin=0, vmax=100, cmap=colors)
+plt.title('Fulfillment Rate across Areas and Hours')
+plt.xlabel('Hour')
+plt.ylabel('Area Code')
+plt.yticks(rotation = 0)
+plt.show()
+```
+
+### Recommending Price Actions
+In the next section, I provide some suggestions that can contribute to the business performance based on the criterion given in the question. However, it's imperative to take number of requests (demand) into account as increasing or decreasing prices impact directly on it.
+
+#### Areas 112, 113, 117, 119, 120, 125, 127, and 128 (High Requests)
+- We need to incentivize riders to accomplish the orders in areas that have large number of `requests` but low `rates of fulfillment`. For instance, Areas 117, 119, and 125 have shown potentials since they have more requets relatively. We can offer bikers a more proportion of fare as their commission (in case it would be possible) to gain a better `fulfillment rate`. 
+
+- Considering the second table (Accepted Orders to Offered Orders) and our criterion for business performance, the ratio in Area 112 is in its desired range at 17 o'clock, so no price action is needed. Areas 113 and 127 have larger than desired ratio, and this means we should make other areas more attractive to bikers. Areas 117, 119 and 125 are suffering from low percentage so that increasing prices can be beneficial (117 and 119 are in more critical situations). 
+
+- Areas 120, 125, and 128 are so close to the desired range according to the tables above. Their previous hours trend don't show too much volatility as well. Therefore, it's recommended not to change prices in these areas. 
+
+
+#### Areas 110, 111, 114, 115, 116, 118, 121, 122, 123, 124, 126 (Low Requests)
+- Ratios in some areas are far below the desired range, but the fact that these areas have received few requests means we should not conclude to increase prices immediately. In fact, one of the reasons why the number of requests is insignificant in these regions may be their high prices. If we had historical information about these areas and their demographic characteristics, we would be more confident in judging if we are attracting suboptimal requests and high pricing is an issue. We assume number of orders are in their natural range.
+
+- Areas 110 and 114 have `accepted-to-offered` percentage above the desired range, so we can increase prices in other areas as a nudge for riders to accept orders in those regions rather than in these two.
+
+- The remaining areas need to have more acceptance rates. Areas 115, 121, 123, and 125 should be taken care of as they have a very low percentage at 17. But again, we would also be better off to increase the commission proportion in favor of riders as `fulfillment rate` is poor. We must remember that prices leads to even lower requests, and the company should seek an optimal increase.
+
+- Areas 115 and 122 have a `fulfillment rate` of 0 at 17 o'clock! In other words, those few requests haven't been delivered at all. Area codes 111, 116, 118, 121, 123 and 126 have rates less than or equal to 50%. Area 123, in specific, is doing poorly throughout the day in this matter. `accepted-to-offered` in area 122 didn't meet the desired level at 12, 13, and 14, and at 16, there was just one request. It might be more reasonable to raise prices to make it more attractive in this area.
+
+- `accepted-to-offered` in area 124 has been somewhat unstable throughout these hours, but now reached its acceptable level. We don't change pricing in this area. 
+
+
+### Missing Values
+In all three tables we see no values for some area codes at some hours during the day. Missing values should always be taken serious and neglecting them could mislead our conclusions. 
+
+- In table 2, the `accepted-to-offered` of area code 123 are missed from 13 to 16 and we only have 2 values (33%) at 12 and 17. We have to stick to the most recent here, but if previous days data existed, we could impute missing values in order to analyze and decide with greater precision. Nonetheless, we know that in this area we have a handful number of requests that are more likely not to delivered (based on fulfillment rate table). 
+
+- Since there is no value available for accepted-to-offered orders in Area 122 at 17 o'clock, our decision must rely on the data from 16 o'clock.
+
+
+# 4. Price Test
+We increased the price of service type 1 in 6 of our cities for two days to test the effect of this change on business. You can see the business parameter changes caused by the price change. What's your analysis of the test result based on this data? Should we increase our prices in these cities? Explain your answer.
+
+Note: 
+
+- We can count the number of users that get the price (checker) and the total number of this action (check). 
+
+- Price Conversion: The ratio of the users who submit the orders to those who get the prices.
+
+- GMV: Gross Merchandise Value. (The sum of the rides price)
+
+
+```{python}
+price_test = pd.read_csv('Snapp Price Test.csv')
+```
+
+
+```{python}
+price_test.rename(columns={'Unnamed: 0':'City', 'Unnamed: 1':'Test Day'}, inplace=True)
+
+price_test['City'] = price_test['City'].fillna(method='ffill')
+
+# price_test['City'] = price_test['City'].str.replace('City ','C').str.replace(' ','') + ' ' + price_test['Test Day'].str.replace('Test ','')
+
+# price_test.drop(columns=['Test Day'], inplace=True)
+
+# price_test.rename(columns={'City':'City Day'}, inplace=True)
+```
+
+
+```{python}
+price_test
+```
+
+### Data Description
+- `Request` has decreased in all cities and both days and this change direction was expected according to the downward demand curve. But this measure is not our criteria by itself and we'll conclude after analysis of other variables. 
+
+- `Ride` column is lower than before in most cities and days since the number of requests decreased.
+
+- `Price Conversion` also declined in almost all cities in both days except City 3 Day 1 and City 4 day 1. In other words, the probability of submiting an order after seeing the price deacreased too. Higher prices and lower `requests` led to these relative changes. 
+
+- `Accepted-to-Offered` ratios increased in City 1, 4, and 5 on both days. The most significant surge in `Accepted-to-Offered` ratios was observed in City 5. On the other hand, Cities 2, 3, and 6 experienced a decrease in their ratios. This ratio naturally comprises two components: the numerator and the denominator. In Cities 1, 4, and 5, price increases have resulted in higher acceptance probabilities among riders due to the enhanced incentives offered by the higher prices. Additionally, the denominator has decreased due to fewer requests and, consequently, fewer offers. Looking at changes of `GMV` column can be helpful to see which effect is stronger. In cities 1 and 5 we earned more money so that the former effect is dominating, but in city 4 the latter seems to be larger.
+
+- `Fulfillment Rate%` represents the percentage of orders or requests that have been delivered, so its change direction and its magnitude can be predicted out of changes in `Request` and `Ride` columns. Generally, in cities 1, 4, and 5 this ratio is greater than before implying that the number of rides didn't plummet to the extent of falling in requests. In other cities, the negative direction means the number of rides deacresed even more than requests.
+
+- `GMV` is arguably one of the most vital factors for any business, as it indicates the company's earnings, despite other considerations that must be taken into account alongside it. This table exhibited a significant increase in City 5 for both days. City 1 also showed growth albeit with a relatively smaller percentage point increase. City 6, however, experienced revenue loss on both days, which, in conjunction with other data, suggests that the new pricing strategy is not performing well there. The situation in City 3 is also not promising from a GMV perspective. Cities 2 and 4 have more intricate scenarios. City 2 incurred a 3 percent GMV loss on the first day, followed by a 9 percent growth on the second day. City 4, conversely, gained 1 percent more GMV but experienced a 3 percent decline on the second day. Further data is required to attain a more confident assessment in this regard.
+
+- It's supposed to see that `Average Fare per KM` rises because of the increase in price levels and the lower levels of `requests` and `rides`. In City 6, though, it's strange to see drops in this variable. One explanation is that although the number of `Requests` and `Ride` dropped, the aggregated distance covered by bikers has reached a higher level than before. 
+
+- `Ride Per Check` is calculated by dividing `Ride` by the number of `Check`, which counts how many times customers have viewed the price. In certain cities and days, although the `Ride` count has decreased, the `Ride Per Check` has increased compared to the benchmark day. This is attributed to the reduced number of `Check` instances more than `Ride`.
+
+### Aggregated Values
+Now, I remove percentage sign from all values to have a dataframe having numeric columns. Then, I try to calculate aggregated values and see if any further analysis can be done.
+
+The following table is produced by taking the average numbers for each city: 
+```{python}
+price_test.iloc[:, 2:] = price_test.iloc[:, 2:].applymap(lambda x: int(x.strip('%')))
+
+price_test.groupby('City').mean()
+```
+
+From this perspective and according to `GMV`, new price action generates more revenues in cities 1, 2, and 5. In other cities, the company incurred financial losses. 
+
+### Final Thoughts
+- We should increase prices in city 1 based on the fact that we gained more money than before because our bikers accepted and fulfilled more requests leading to more GMV. 
+
+- In city 2, we saw lower requests have been accepted, and GMV fell in the first day, but in the second day, a sharp increase is seen. Ride per Check decreased meaning that either the number of checks is going upward or its decrease is not as much as rides, which is a not good thing, and because price conversion and ride numbers hurt badly, we don't recommend increasing prices.
+
+- In city 3, bikers are more reluctant accepting their offers compared to the benchmark day. We lost our gross revenue and it's not recommended to continuing new price action.
+
+- In city 4, we can infer that the times customers get our prices (check) is less than before and the probability of conversion is better. Although we lost money on day 2, increasing prices might be beneficial in the future.
+
+- We should increase prices in city 5 due to its promising relative changes.
+
+- We should not increase prices in city 6 as the number of requests, rides, probability of acceptance, and most importantly, GMV is declining.
+
+
+### A More Elaborate Methodology
+The data points in this data set are not sufficient to make an informed decision. In case we had more records, we could utilize some more complicated but precise methods. Econometrics provides valuable tools for scientifically measuring the effects of changes the company makes on other business metrics, such as `GMV`. One of these tools is the difference-in-difference method. 
+
+To employ the diff-in-diff approach, we would require more data points across various days before and after the change. This method assumes that there are parallel trends in the targeted metrics across different days for various cities. By using linear regression, we can more accurately determine whether the new prices are beneficial in each city."
